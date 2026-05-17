@@ -42,8 +42,34 @@ pub fn resolve_path(path: &str, _workspace: &WorkspaceEnv) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// True for WSL distro names safe to splice into a UNC path. Real WSL distros
+/// are alphanumeric with `.`, `_`, `-` separators (e.g. `Ubuntu-22.04`). Reject
+/// anything that could traverse out of the `\\wsl.localhost\<distro>\` prefix
+/// (`..`, `\`, `/`, `:`, `?`, `*`, control bytes) or empty names.
+#[cfg(windows)]
+fn is_safe_distro_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 255 {
+        return false;
+    }
+    if name == "." || name == ".." || name.starts_with('.') {
+        return false;
+    }
+    name.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ' '))
+        && !name.contains("..")
+}
+
 #[cfg(windows)]
 pub fn wsl_path_to_unc(distro: &str, path: &str) -> PathBuf {
+    // Defense-in-depth: refuse to construct a UNC path with a distro name that
+    // could escape the WSL share root via `..`, `\`, or other path metachars.
+    // Returns a clearly-invalid path that downstream `is_dir()`/`metadata()`
+    // checks will reject. The webview's distro list comes from `wsl.exe --list`
+    // and is normally trustworthy, but a locally-registered malicious distro
+    // can name itself with traversal characters; this filter blocks that.
+    if !is_safe_distro_name(distro) {
+        return PathBuf::from(r"\\wsl.localhost\__terax_invalid_distro__");
+    }
     let normalized = path.replace('\\', "/");
     let trimmed = normalized.trim_start_matches('/');
     let primary = PathBuf::from(format!(
@@ -175,5 +201,56 @@ pub fn wsl_home(distro: String) -> Result<String, String> {
         } else {
             Ok(home)
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distro_validator_accepts_real_names() {
+        assert!(is_safe_distro_name("Ubuntu"));
+        assert!(is_safe_distro_name("Ubuntu-22.04"));
+        assert!(is_safe_distro_name("Debian"));
+        assert!(is_safe_distro_name("Alpine_3.18"));
+        assert!(is_safe_distro_name("openSUSE-Tumbleweed"));
+    }
+
+    #[test]
+    fn distro_validator_rejects_path_traversal() {
+        assert!(!is_safe_distro_name(".."));
+        assert!(!is_safe_distro_name("..\\..\\Windows"));
+        assert!(!is_safe_distro_name("../foo"));
+        assert!(!is_safe_distro_name("foo/bar"));
+        assert!(!is_safe_distro_name("foo\\bar"));
+        assert!(!is_safe_distro_name("foo..bar"));
+    }
+
+    #[test]
+    fn distro_validator_rejects_special_chars() {
+        assert!(!is_safe_distro_name("foo:bar"));
+        assert!(!is_safe_distro_name("foo?bar"));
+        assert!(!is_safe_distro_name("foo*bar"));
+        assert!(!is_safe_distro_name("foo\0bar"));
+        assert!(!is_safe_distro_name(""));
+        assert!(!is_safe_distro_name(".hidden"));
+    }
+
+    #[test]
+    fn wsl_path_to_unc_blocks_traversal_distro() {
+        // Malicious distro name must produce a path that is_dir() will reject,
+        // never escape the WSL share root.
+        let p = wsl_path_to_unc("..\\..\\..\\Windows", "/etc/passwd");
+        let s = p.to_string_lossy();
+        assert!(s.contains("__terax_invalid_distro__"), "got: {s}");
+        assert!(!s.contains("\\..\\"), "got: {s}");
+    }
+
+    #[test]
+    fn wsl_path_to_unc_accepts_valid_distro() {
+        let p = wsl_path_to_unc("Ubuntu", "/etc/hosts");
+        let s = p.to_string_lossy();
+        assert!(!s.contains("__terax_invalid_distro__"), "got: {s}");
     }
 }
