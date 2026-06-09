@@ -148,12 +148,12 @@ export function TabBar({
           >
             <span
               aria-hidden
-              className="pointer-events-none absolute left-0 top-0 h-7 rounded-md bg-accent"
+              className="pointer-events-none absolute left-0 top-1/2 h-7 rounded-md bg-accent"
               style={
                 pill
                   ? {
                       width: pill.width,
-                      transform: `translateX(${pill.left}px)`,
+                      transform: `translate(${pill.left}px, -50%)`,
                       transitionProperty: pillReady ? "transform, width" : "none",
                       transitionDuration: "var(--dur-base)",
                       transitionTimingFunction: "var(--ease-premium)",
@@ -209,8 +209,10 @@ export function TabBar({
                     if (e.button === 1) e.preventDefault();
                   }}
                   className={cn(
-                    "group relative z-[1] h-7 shrink-0 gap-1.5 rounded-md text-xs transition-colors hover:text-foreground/80 justify-between",
-                    isActive ? "text-foreground" : "text-muted-foreground",
+                    "group relative z-[1] h-7 shrink-0 justify-between gap-1.5 rounded-md bg-transparent text-xs transition-colors data-active:bg-transparent dark:data-active:bg-transparent",
+                    isActive
+                      ? "text-foreground dark:text-foreground"
+                      : "text-muted-foreground hover:text-foreground/80 dark:text-muted-foreground",
                     compact
                       ? "px-1.5!"
                       : tabs.length === 1
