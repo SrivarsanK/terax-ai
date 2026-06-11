@@ -19,6 +19,8 @@ afterEach(() => {
 function makeFakeTerm() {
   const handlers = new Map<number, OscHandler>();
   let currentLine = 0;
+  let selection: [number, number] | null = null;
+  let scrolledTo: number | null = null;
   const term = {
     options: {} as Record<string, unknown>,
     element: null,
@@ -37,6 +39,16 @@ function makeFakeTerm() {
     onWriteParsed: vi.fn(() => ({ dispose: vi.fn() })),
     onScroll: vi.fn(() => ({ dispose: vi.fn() })),
     onRender: vi.fn(() => ({ dispose: vi.fn() })),
+    hasSelection: () => selection !== null,
+    selectLines: (start: number, end: number) => {
+      selection = [start, end];
+    },
+    clearSelection: () => {
+      selection = null;
+    },
+    scrollToLine: (line: number) => {
+      scrolledTo = line;
+    },
     buffer: {
       active: {
         type: "normal",
@@ -54,6 +66,8 @@ function makeFakeTerm() {
     setLine: (n: number) => {
       currentLine = n;
     },
+    getSelection: () => selection,
+    getScrolledTo: () => scrolledTo,
   };
 }
 
@@ -110,6 +124,17 @@ describe("BlockDecorations — OSC 133 block lifecycle", () => {
     expect(deco.getBlocks()).toHaveLength(0);
   });
 
+  it("reports hasAnyBlock for live and finished blocks", () => {
+    const { term, emit, setLine } = makeFakeTerm();
+    const deco = new BlockDecorations(term);
+    expect(deco.hasAnyBlock()).toBe(false);
+    setLine(1);
+    emit("C;ls");
+    expect(deco.hasAnyBlock()).toBe(true);
+    emit("D;0");
+    expect(deco.hasAnyBlock()).toBe(true);
+  });
+
   it("caps history at MAX_BLOCKS, dropping the oldest", () => {
     const { term, emit, setLine } = makeFakeTerm();
     const deco = new BlockDecorations(term);
@@ -122,5 +147,58 @@ describe("BlockDecorations — OSC 133 block lifecycle", () => {
     expect(blocks).toHaveLength(1000);
     expect(blocks[0].command).toBe("cmd5");
     expect(blocks[blocks.length - 1].command).toBe("cmd1004");
+  });
+});
+
+describe("BlockDecorations — selection and navigation", () => {
+  function withBlocks(count: number) {
+    const fake = makeFakeTerm();
+    const deco = new BlockDecorations(fake.term);
+    for (let i = 0; i < count; i++) {
+      fake.setLine(i * 10);
+      fake.emit(`C;cmd${i}`);
+      fake.setLine(i * 10 + 5);
+      fake.emit("D;0");
+    }
+    return { ...fake, deco };
+  }
+
+  it("selectBlock selects the block range and clearBlockSelection drops it", () => {
+    const { deco, getSelection } = withBlocks(2);
+    const id = deco.getBlocks()[0].id;
+    deco.selectBlock(id);
+    expect(getSelection()).toEqual([0, 5]);
+    expect(deco.clearBlockSelection()).toBe(true);
+    expect(getSelection()).toBeNull();
+    expect(deco.clearBlockSelection()).toBe(false);
+  });
+
+  it("navigateBlocks starts at the most recent block and steps backwards", () => {
+    const { deco, getSelection, getScrolledTo } = withBlocks(3);
+    deco.navigateBlocks(-1);
+    expect(getSelection()).toEqual([20, 25]);
+    expect(getScrolledTo()).toBe(18);
+    deco.navigateBlocks(-1);
+    expect(getSelection()).toEqual([10, 15]);
+    deco.navigateBlocks(1);
+    expect(getSelection()).toEqual([20, 25]);
+  });
+
+  it("navigateBlocks stops at the edges", () => {
+    const { deco, getSelection } = withBlocks(2);
+    deco.navigateBlocks(-1);
+    deco.navigateBlocks(-1);
+    deco.navigateBlocks(-1);
+    expect(getSelection()).toEqual([0, 5]);
+    deco.navigateBlocks(1);
+    deco.navigateBlocks(1);
+    deco.navigateBlocks(1);
+    expect(getSelection()).toEqual([10, 15]);
+  });
+
+  it("navigateBlocks is a no-op with no blocks", () => {
+    const { term } = makeFakeTerm();
+    const deco = new BlockDecorations(term);
+    expect(() => deco.navigateBlocks(-1)).not.toThrow();
   });
 });
