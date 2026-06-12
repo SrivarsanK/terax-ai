@@ -56,7 +56,6 @@ type Props = {
   onPathDeleted?: (path: string) => void;
   onRevealInTerminal?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
-  onOpenMarkdownPreview?: (path: string) => void;
   gitStatus?: GitStatusSnapshot | null;
 };
 
@@ -91,10 +90,6 @@ const OVERSCAN = 8;
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : path;
-}
-
-function isMarkdownPath(path: string): boolean {
-  return /\.(md|markdown|mdx)$/i.test(path);
 }
 
 function parentOf(path: string, fallback: string): string {
@@ -192,7 +187,6 @@ export const FileExplorer = memo(
       onPathDeleted,
       onRevealInTerminal,
       onAttachToAgent,
-      onOpenMarkdownPreview,
       gitStatus,
     },
     ref,
@@ -640,16 +634,6 @@ export const FileExplorer = memo(
                       Open
                     </ContextMenuItem>
                   )}
-                  {!menuTarget.isDir &&
-                    isMarkdownPath(menuTarget.path) &&
-                    onOpenMarkdownPreview && (
-                      <ContextMenuItem
-                        className={COMPACT_ITEM}
-                        onSelect={() => onOpenMarkdownPreview(menuTarget.path)}
-                      >
-                        Open Preview
-                      </ContextMenuItem>
-                    )}
                   {menuTarget.isDir && onRevealInTerminal && (
                     <ContextMenuItem
                       className={COMPACT_ITEM}
